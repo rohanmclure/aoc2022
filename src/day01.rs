@@ -1,4 +1,4 @@
-use std::io::{BufReader, BufRead, self, Read};
+use std::io::{BufReader, BufRead, self};
 use std::fs::File;
 use std::str::FromStr;
 use std::error;
@@ -7,25 +7,50 @@ use std::env;
 
 type Result<T> = std::result::Result<T, Box<dyn error::Error>>;
 
-fn parse(r: &mut BufReader<File>) -> Result<Vec<Vec<u64>>> {
+fn parse(r: &mut BufReader<File>) -> Result<Vec<Vec<usize>>> {
     let mut elves = vec![];
 
-    let mut line = String::from_str("").unwrap();
-    loop {
-        let mut v: Vec<u64> = vec![];
+    'outer: loop {
+
+        let mut v: Vec<usize> = vec![];
         loop {
-            r.read_line(&mut line)?;
+            let mut l = String::from_str("").unwrap();
+
+            let bytes = r.read_line(&mut l)?;
+            let line = l.trim_end();
+            println!("{line}");
+            if bytes == 0 {
+                break 'outer;                
+            }
 
             if line.is_empty() {
                 break;
             }
 
-            v.push(line.parse::<u64>()?);
+            v.push(line.parse::<usize>()?);
         }
 
         elves.push(v);
     }
+
     Ok(elves)
+}
+
+/* Dangerously inefficient. How am I a computer scientist? */
+fn top_few(v: &Vec<usize>, n: usize) -> Vec<usize> {
+    let mut v = v.clone();
+    let mut ret = vec![];
+
+    for _ in 0..n {
+        let (i,_) = v.iter().enumerate()
+                     .max_by(|(_,a), (_,b)| a.cmp(b)).unwrap();
+
+        let m = v[i];
+        v.remove(i);
+        ret.push(m);
+    }
+    
+    ret
 }
 
 fn main() -> io::Result<()> {
@@ -37,17 +62,22 @@ fn main() -> io::Result<()> {
 
     let f = File::open(&args[1])?;
 
-    let v = parse(&mut BufReader::new(f));
+    let v = parse(&mut BufReader::new(f))
+                .unwrap_or_else(|_| panic!("Unable to parse file"));
+    
+    let mut elf_sums: Vec<usize> = vec![];
 
-    let mut max: u64 = 0;
-    let mut max_i: u64 = 0;
-
-    for (i, elf) in v.iter().enumerate() {
-        let local_max = elf.iter().max().unwrap_or_else(|_| 0);
-        if local_max > max {
-            max = local_max;
-        }
+    for elf in v {
+        elf_sums.push(elf.iter().sum());
     }
+    
+    let top_elves = top_few(&elf_sums, 3);
+    
+    println!("The maximum caloric value is: {}",
+             top_elves[0]);
+    
+    println!("Best three elves have total caloric intake: {}",
+             top_elves.iter().sum::<usize>());
 
     Ok(())
 }
