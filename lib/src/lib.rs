@@ -7,12 +7,3 @@ pub mod tree;
 
 #[global_allocator]
 static A: System = System;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-    }
-}
