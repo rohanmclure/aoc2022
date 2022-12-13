@@ -43,6 +43,10 @@ path = "src/day09.rs"
 name = "day10"
 path = "src/day10.rs"
 
+[[bin]]
+name = "day11"
+path = "src/day11.rs"
+
 [lib]
 name = "aoc"
 path = "lib/src/lib.rs"
@@ -50,6 +54,7 @@ path = "lib/src/lib.rs"
 [dependencies]
 regex       = "1.7.0"
 lazy_static = "1.4.0"
+num         = "0.4.0"
 
 [unstable]
 allocator_api = true
