@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 
 use std::env;
 use std::fs;
@@ -7,54 +8,59 @@ use std::io::BufReader;
 use aoc::parser::parse_non_empty_line;
 
 
-#[derive(Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum Packet {
     Sub(Vec<Packet>),
     Entry(usize)
 }
 
-impl Packet {
-    fn le(&self, rhs: &Packet) -> bool {
+impl PartialOrd for Packet {
+    fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
         match self {
             Packet::Sub(v) => {
                 match rhs {
                     Packet::Sub(u) => {
                         for (i, e) in v.iter().enumerate() {
                             if i == u.len() {
-                                println!("Comparing {:?}, {:?}: false", self, rhs);
-                                return false;
+                                return Some(std::cmp::Ordering::Greater);
                             }
                             let f = &u[i];
-                            if !e.le(f) {
-                                println!("Comparing {:?}, {:?}: false", self, rhs);
-                                return false;
+
+                            if e.gt(f) {
+                                return Some(std::cmp::Ordering::Greater);
+                            } else if e.lt(f) {
+                                return Some(std::cmp::Ordering::Less)
                             }
                         }
-                        println!("Comparing {:?}, {:?}: true", self, rhs);
-                        true
+
+                        if v.len() < u.len() {
+                            Some(std::cmp::Ordering::Less)
+                        } else {
+                            Some(std::cmp::Ordering::Equal)
+                        }
                     },
                     Packet::Entry(f) => {
-                        let b = self.le(&Packet::Sub(vec![Packet::Entry(*f)]));
-                        println!("Comparing {:?}, {:?}: {}", self, rhs, b);
-                        b
+                        self.partial_cmp(&Packet::Sub(vec![Packet::Entry(*f)]))
                     },
                 }
             },
             Packet::Entry(e) => {
                 match rhs {
                     Packet::Sub(_) => {
-                        let b = Packet::Sub(vec![Packet::Entry(*e)]).le(rhs);
-                        println!("Comparing {:?}, {:?}: {}", self, rhs, b);
-                        b
+                        Packet::Sub(vec![Packet::Entry(*e)]).partial_cmp(rhs)
                     },
                     Packet::Entry(f) => {
-                        let b = *e <= *f;
-                        println!("Comparing {:?}, {:?}: {}", self, rhs, b);
-                        b
+                        e.partial_cmp(f)
                     }
                 }
             }
         }
+    }
+}
+
+impl Ord for Packet {
+    fn cmp(&self, rhs: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(rhs).unwrap()
     }
 }
 
@@ -84,7 +90,6 @@ fn parse_packet(line: &String) -> Packet {
                         }
                         consecutive_numbers.push(String::from_iter(s[num_start..*idx].iter())
                                                  .parse::<usize>().unwrap());
-                        // println!("Parsed number: {}", consecutive_numbers.last().unwrap());
 
                         match s[*idx] {
                             ',' => {
@@ -101,12 +106,10 @@ fn parse_packet(line: &String) -> Packet {
                     subs.append(&mut consecutive_numbers.iter().map(|n| Packet::Entry(*n)).collect());
                 },
                 '[' => {
-                    // println!("Recursing with remainder: {}", String::from_iter(s[*idx..].iter()));
                     subs.push(recurse(idx, s));
                 },
                 ']' => {
                     *idx += 1;
-                    // println!("Returning to parse remainder: {}", String::from_iter(s[*idx..].iter()));
                     return Packet::Sub(subs);
                 },
                 ',' => {
@@ -158,12 +161,30 @@ fn main() -> io::Result<()> {
         let idx = i+1;
         let (lp, rp) = (&pair[0], &pair[1]);
 
-        if lp.le(&rp) {
+        if lp <= rp {
             sum += idx;
         }
     }
 
     println!("Part one: index sum of in-order packet pairs: {sum}");
+
+    let mut packets = vec![];
+    for mut pair in packet_pairs {
+        packets.append(&mut pair);
+    }
+
+    /* Include dividers */
+    let divider_A = Packet::Sub(vec![Packet::Sub(vec![Packet::Entry(2)])]);
+    let divider_B = Packet::Sub(vec![Packet::Sub(vec![Packet::Entry(6)])]);
+    packets.push(divider_A.clone());
+    packets.push(divider_B.clone());
+
+    packets.sort();
+
+    let off_A = 1 + packets.binary_search(&divider_A).unwrap();
+    let off_B = 1 + packets.binary_search(&divider_B).unwrap();
+
+    println!("Part two: decoder key: {}", off_A * off_B);
 
     Ok(())
 }
