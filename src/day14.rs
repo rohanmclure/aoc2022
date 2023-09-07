@@ -3,210 +3,177 @@
 use std::env;
 use std::fs;
 use std::io;
+use std::io::BufRead;
 use std::io::BufReader;
+use std::ops::Index;
+use std::ops::IndexMut;
 
 use lazy_static::lazy_static;
+use regex::Regex;
 
 use aoc::matrix::Matrix;
 use aoc::parser::parse_non_empty_line;
 
 lazy_static! {
-    static ref START_POINT: (isize, isize) = (500,0);
+    static ref POINT_REGEX: Regex = Regex::new(r"(\-?[0-9]+),(\-?[0-9])+")
+                          .unwrap();
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Copy, Clone)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+impl Point {
+    fn straight_line(&self, p: &Self) -> Option<Box<dyn Iterator<Item=Self>>> {
+        let q = self;
+
+        if (q.x != p.x) && (q.y != p.y) {
+            return None;
+        }
+
+        if q.x == p.x {
+            let x = q.x;
+            let a = p.y.min(q.y);
+            let b = p.y.max(q.y);
+            Some(Box::new((a..=b).map(move |y| Point { x, y })))
+        } else {
+            let y = q.y;
+            let a = p.x.min(q.x);
+            let b = p.x.max(q.x);
+            Some(Box::new((a..=b).map(move |x| Point { x, y })))
+        }
+    }
+
+    fn to_relative(self, p: Self) -> Self {
+        Point {
+            x: self.x - p.x,
+            y: self.y - p.y
+        }
+    }
+
+    fn from_relative(self, p: Self) -> Self {
+        Point {
+            x: self.x + p.x,
+            y: self.y + p.y
+        }
+    }
+}
+
+impl<T> Index<Point> for Matrix<T> {
+    type Output = T;
+
+    fn index(&self, Point { x, y }: Point) -> &Self::Output {
+        &self[(x as usize, y as usize)]
+    }
+}
+
+impl<T> IndexMut<Point> for Matrix<T> {
+    fn index_mut(&mut self, Point { x, y }: Point) -> &mut Self::Output {
+        &mut self[(x as usize, y as usize)]
+    }
+}
+
+#[derive(Clone, Copy)]
 enum Element {
-    Stone,
+    Rock,
     Sand,
     Air
 }
 
 impl Element {
-    fn blocks(&self) -> bool {
+    fn is_rigid(&self) -> bool {
         match self {
-            Element::Stone => true,
-            Element::Sand  => true,
-            Element::Air   => false,
+            Self::Rock => true,
+            Self::Sand => true,
+            Self::Air  => false
         }
     }
 }
 
-fn parse_draw_directives(line: &String) -> Vec<(isize, isize)> {
-    let mut v = vec![];
-    for pair in line.split(" -> ") {
-        let mut split = pair.splitn(2, ',');
-        v.push((split.next().unwrap().parse().unwrap(),
-                split.next().unwrap().parse().unwrap()));
-    }
-    v
-}
-
-fn main() -> io::Result<()> {
+fn main() {
 
     let args: Vec<String> = env::args().collect();
+    let f = fs::File::open(&args[1]).unwrap();
+    let mut r = BufReader::new(f);
 
-    if args.len() != 2 {
-        panic!("Incorrect number of args!")
+    let mut line = String::new();
+    let mut points = vec![];
+    while let Ok(_) = r.read_line(&mut line) {
+
+        let mut pairs = vec![];
+        for e in line.split("->") {
+            let cap = POINT_REGEX.captures(e.trim()).unwrap();
+            pairs.push(Point { x: i64::from_str_radix(cap.get(1).unwrap().as_str(), 10).unwrap(),
+                               y: i64::from_str_radix(cap.get(2).unwrap().as_str(), 10).unwrap()} );
+        }
+
+        for i in 0 .. pairs.len() - 1 {
+            points.extend(pairs[i].straight_line(&pairs[i+1])
+                                  .unwrap());
+        }
+
     }
 
-    let mut r = {
-        let f = fs::File::open(&args[1])?;
-        BufReader::new(f)
-    };
+    /* Get the maximum, minimum of all coordinates */
+    let x_range = (
+        points.iter().map(|p| p.x).min().unwrap(),
+        points.iter().map(|p| p.x).max().unwrap()
+    );
 
-    /* Calculate relevant indices */
-    let mut shapes = vec![];
-    while let Some(line) = parse_non_empty_line(&mut r) {
-        shapes.push(parse_draw_directives(&line));
-    }
+    let y_range = (
+        points.iter().map(|p| p.y).min().unwrap(),
+        points.iter().map(|p| p.y).max().unwrap()
+    );
 
-    let mut endpoints = vec![];
-    for shape in shapes.iter() {
-        for endpoint in shape.iter() {
-            endpoints.push(endpoint.clone());
+    let (m, n) = (
+        x_range.1 - x_range.0 + 1,
+        y_range.1 - y_range.0 + 1
+    );
+
+    let r = Point { x: x_range.0, y: y_range.1 };
+    let mut g: Matrix<Element> = Matrix::new(m as usize, n as usize);
+    g.fill(Element::Air);
+
+    {
+        let points: Vec<Point> = points.iter().map(|p| p.to_relative(r)).collect();
+        for p in points {
+            g[p] = Element::Rock;
         }
     }
 
     /*
-     *  x_range should be centered around the start point's x value
-     *  y_range is +1 because I don't intend to represent the bottom.
+     * Base problem:
      */
-    let y_range = START_POINT.1 ..= (endpoints.iter().map(|e| e.1).max().unwrap() + 1);
-    let x_range = {
-        let diff = endpoints.iter().map(|e| e.0).max().unwrap()
-                   - endpoints.iter().map(|e| e.0).min().unwrap() + 1;
-        let len = diff.max(y_range.clone().count() as isize) * 2;
-        (START_POINT.0 - len) ..= (START_POINT.0 + len)
-    };
 
-    let mut grid = Matrix::new(x_range.clone().count(),
-                               y_range.clone().count());
-    grid.fill(Element::Air);
-
-    /* Draw the shapes */
-    let as_idx = |(x,y)| {
-        if  !x_range.contains(&x)
-         || !y_range.contains(&y) {
-            None
-        } else {
-            Some(((x - x_range.start()) as usize,
-                  (y - y_range.start()) as usize))
-        }
-    };
-
-    for shape in shapes.iter() {
-        let (mut x, mut y) = shape[0].clone();
-        grid[as_idx((x,y)).unwrap()] = Element::Stone;
-        for endpoint in shape[1..].iter() {
-            let diff = (endpoint.0 - x,
-                        endpoint.1 - y);
-
-            if diff.0 > 0 {
-                for x in x+1 ..= endpoint.0 {
-                    grid[as_idx((x,y)).unwrap()] = Element::Stone;
-                }
-            } else if diff.1 > 0 {
-                for y in y+1 ..= endpoint.1 {
-                    grid[as_idx((x,y)).unwrap()] = Element::Stone;
-                }
-            } else if diff.0 < 0 {
-                for x in endpoint.0 ..= x-1 {
-                    grid[as_idx((x,y)).unwrap()] = Element::Stone;
-                }
-            } else if diff.1 < 0 {
-                for y in endpoint.1 ..= y-1 {
-                    grid[as_idx((x,y)).unwrap()] = Element::Stone;
-                }
+    loop {
+        let mut s = Point { x: 500, y: 0 }.to_relative(r);
+        loop {
+            if g[s].is_rigid() {
+                panic!("Invalid start position for sand.");
             }
 
-            (x, y) = endpoint.clone();
+            /* figure out where to go */
+            let n = Point { x: s.x, y: s.y - 1 };
+            if !g[n].is_rigid() {
+                s = n;
+                continue;
+            }
+
+            let l = Point { x: s.x - 1, y: s.y - 1 };
+            let r = Point { x: s.x + 1, y: s.y - 1 };
+            if !g[l].is_rigid() {
+                s = l;
+                continue;
+            } else if !g[r].is_rigid() {
+                s = r;
+                continue;
+            }
+
+            break;
         }
+        g[s] = Element::Sand;
     }
-
-    /* Simulate */
-    assert!(x_range.contains(&START_POINT.0));
-
-    'grains: loop {
-        let mut c_pos = *START_POINT;
-
-        'simulate: loop {
-
-            if *y_range.end() < c_pos.1 {
-                /* We've entered and then exited the window. */
-                break 'grains;
-            }
-
-            for next_pos in vec![(c_pos.0,     c_pos.1 + 1),
-                                 (c_pos.0 - 1, c_pos.1 + 1),
-                                 (c_pos.0 + 1, c_pos.1 + 1)] {
-
-                if as_idx(next_pos).map_or(true, |idx| !grid[idx].blocks()) {
-                    c_pos = next_pos;
-                    continue 'simulate;
-                }
-            }
-
-            /* No valid transitions remain. */
-            grid[as_idx(c_pos).unwrap()] = Element::Sand;
-            break 'simulate;
-        }
-    }
-
-    let (m, n) = grid.get_dims();
-    let mut num_sand = 0;
-    for x in 0..m {
-        for y in 0..n {
-            if matches!(grid[(x,y)], Element::Sand) {
-                num_sand += 1;
-            }
-        }
-    }
-
-    println!("Part one: final number of sand grains: {}", num_sand);
-
-    grid.fill(Element::Air);
-
-    'grains: loop {
-        let mut c_pos = *START_POINT;
-
-        if grid[as_idx(c_pos).unwrap()] == Element::Sand {
-            break 'grains;
-        }
-
-        'simulate: loop {
-            for next_pos in vec![(c_pos.0,     c_pos.1 + 1),
-                                 (c_pos.0 - 1, c_pos.1 + 1),
-                                 (c_pos.0 + 1, c_pos.1 + 1)] {
-
-                /* Assume x range sufficiently large
-                 * so that out of bounds --> we've hit
-                 * bottom boundary
-                 */
-                if as_idx(next_pos).map_or(false,
-                                           |idx| !grid[idx].blocks()) {
-
-                    c_pos = next_pos;
-                    continue 'simulate;
-                }
-            }
-
-            /* No viable positions. */
-            grid[as_idx(c_pos).unwrap()] = Element::Sand;
-            break 'simulate;
-        }
-    }
-
-    let (m, n) = grid.get_dims();
-    let mut num_sand = 0;
-    for x in 0..m {
-        for y in 0..n {
-            if matches!(grid[(x,y)], Element::Sand) {
-                num_sand += 1;
-            }
-        }
-    }
-
-    println!("Part two: final number of sand grains: {}", num_sand);
-
-    Ok(())
+    
 }
